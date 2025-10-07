@@ -249,7 +249,7 @@ Natural language query:"""
 
         return query, context
 
-    except Exception as e:
+    except Exception:
         # Fallback to generic queries if LLM fails
         table_names = list(schema_info.get('tables', {}).keys())
         if not table_names:
