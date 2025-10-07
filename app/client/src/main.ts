@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeQueryInput();
   initializeFileUpload();
   initializeModal();
+  initializeGenerateQuery();
   loadDatabaseSchema();
 });
 
@@ -103,15 +104,69 @@ async function handleFileUpload(file: File) {
   }
 }
 
-// Load database schema
+// Generate Query Functionality
+function initializeGenerateQuery() {
+  const generateButton = document.getElementById('generate-query-button') as HTMLButtonElement;
+  const queryInput = document.getElementById('query-input') as HTMLTextAreaElement;
+
+  generateButton.addEventListener('click', async () => {
+    // Disable button and show loading state
+    generateButton.disabled = true;
+    generateButton.classList.add('loading');
+    const originalText = generateButton.textContent;
+
+    try {
+      const response = await api.generateQuery({});
+
+      if (response.error) {
+        displayError(response.error);
+      } else {
+        // Populate the query input with generated query
+        queryInput.value = response.query;
+
+        // Add animation to highlight the populated field
+        queryInput.classList.add('populated');
+        setTimeout(() => {
+          queryInput.classList.remove('populated');
+        }, 500);
+
+        // Focus the input
+        queryInput.focus();
+      }
+    } catch (error) {
+      displayError(error instanceof Error ? error.message : 'Failed to generate query');
+    } finally {
+      // Re-enable button and remove loading state
+      generateButton.disabled = false;
+      generateButton.classList.remove('loading');
+      generateButton.textContent = originalText;
+    }
+  });
+}
+
+// Load database schema and update button states
 async function loadDatabaseSchema() {
   try {
     const response = await api.getSchema();
     if (!response.error) {
       displayTables(response.tables);
+      updateGenerateButtonState(response.tables);
     }
   } catch (error) {
     console.error('Failed to load schema:', error);
+  }
+}
+
+// Update Generate Query button state based on available tables
+function updateGenerateButtonState(tables: TableSchema[]) {
+  const generateButton = document.getElementById('generate-query-button') as HTMLButtonElement;
+
+  if (tables.length === 0) {
+    generateButton.disabled = true;
+    generateButton.title = 'Upload data first to generate queries';
+  } else {
+    generateButton.disabled = false;
+    generateButton.title = 'Generate a random query based on your data';
   }
 }
 
