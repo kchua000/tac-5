@@ -328,14 +328,18 @@ class TestEndToEndSQLInjection:
 def test_integration_upload_malicious_filename(test_db):
     """Test that malicious filenames are handled safely during upload"""
     from core.file_processor import convert_csv_to_sqlite
-    
+
     # Create a simple CSV content
     csv_content = b"name,age\nAlice,30\nBob,25"
-    
+
     # Try with malicious filename
     malicious_name = "data'; DROP TABLE users; --.csv"
-    result = convert_csv_to_sqlite(csv_content, malicious_name)
-    
+
+    # Patch file_processor to use the test database instead of live database
+    with patch('core.file_processor.sqlite3.connect') as mock_connect:
+        mock_connect.return_value = sqlite3.connect(test_db)
+        result = convert_csv_to_sqlite(csv_content, malicious_name)
+
     # The table should be created with a sanitized name
     assert result['table_name'] != malicious_name
     assert "'" not in result['table_name']

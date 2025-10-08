@@ -1,6 +1,21 @@
 import './style.css'
 import { api } from './api/client'
 
+// Debounce utility function
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  return function(...args: Parameters<T>) {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
+
 // Global state
 
 // Initialize app
@@ -8,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeQueryInput();
   initializeFileUpload();
   initializeModal();
+  initializeGenerateQuery();
   loadDatabaseSchema();
 });
 
@@ -15,36 +31,45 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeQueryInput() {
   const queryInput = document.getElementById('query-input') as HTMLTextAreaElement;
   const queryButton = document.getElementById('query-button') as HTMLButtonElement;
-  
-  queryButton.addEventListener('click', async () => {
+
+  const handleQuery = async () => {
     const query = queryInput.value.trim();
     if (!query) return;
-    
+
     queryButton.disabled = true;
+    queryInput.disabled = true;
     queryButton.innerHTML = '<span class="loading"></span>';
-    
+
     try {
       const response = await api.processQuery({
         query,
         llm_provider: 'openai'  // Default to OpenAI
       });
-      
+
       displayResults(response, query);
-      
+
       // Clear the input field on success
       queryInput.value = '';
     } catch (error) {
       displayError(error instanceof Error ? error.message : 'Query failed');
     } finally {
       queryButton.disabled = false;
+      queryInput.disabled = false;
       queryButton.textContent = 'Query';
     }
-  });
-  
+  };
+
+  // Wrap with debounce to prevent rapid-fire submissions
+  const debouncedHandleQuery = debounce(handleQuery, 300);
+
+  queryButton.addEventListener('click', debouncedHandleQuery);
+
   // Allow Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to submit
   queryInput.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      queryButton.click();
+      if (!queryButton.disabled) {
+        queryButton.click();
+      }
     }
   });
 }
@@ -103,15 +128,69 @@ async function handleFileUpload(file: File) {
   }
 }
 
-// Load database schema
+// Generate Query Functionality
+function initializeGenerateQuery() {
+  const generateButton = document.getElementById('generate-query-button') as HTMLButtonElement;
+  const queryInput = document.getElementById('query-input') as HTMLTextAreaElement;
+
+  generateButton.addEventListener('click', async () => {
+    // Disable button and show loading state
+    generateButton.disabled = true;
+    generateButton.classList.add('loading');
+    const originalText = generateButton.textContent;
+
+    try {
+      const response = await api.generateQuery({});
+
+      if (response.error) {
+        displayError(response.error);
+      } else {
+        // Populate the query input with generated query
+        queryInput.value = response.query;
+
+        // Add animation to highlight the populated field
+        queryInput.classList.add('populated');
+        setTimeout(() => {
+          queryInput.classList.remove('populated');
+        }, 500);
+
+        // Focus the input
+        queryInput.focus();
+      }
+    } catch (error) {
+      displayError(error instanceof Error ? error.message : 'Failed to generate query');
+    } finally {
+      // Re-enable button and remove loading state
+      generateButton.disabled = false;
+      generateButton.classList.remove('loading');
+      generateButton.textContent = originalText;
+    }
+  });
+}
+
+// Load database schema and update button states
 async function loadDatabaseSchema() {
   try {
     const response = await api.getSchema();
     if (!response.error) {
       displayTables(response.tables);
+      updateGenerateButtonState(response.tables);
     }
   } catch (error) {
     console.error('Failed to load schema:', error);
+  }
+}
+
+// Update Generate Query button state based on available tables
+function updateGenerateButtonState(tables: TableSchema[]) {
+  const generateButton = document.getElementById('generate-query-button') as HTMLButtonElement;
+
+  if (tables.length === 0) {
+    generateButton.disabled = true;
+    generateButton.title = 'Upload data first to generate queries';
+  } else {
+    generateButton.disabled = false;
+    generateButton.title = 'Generate a random query based on your data';
   }
 }
 

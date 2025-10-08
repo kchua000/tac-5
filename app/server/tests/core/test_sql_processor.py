@@ -10,7 +10,7 @@ def test_db():
     # Create in-memory database
     conn = sqlite3.connect(':memory:')
     cursor = conn.cursor()
-    
+
     # Create test tables
     cursor.execute('''
         CREATE TABLE users (
@@ -20,7 +20,7 @@ def test_db():
             email TEXT
         )
     ''')
-    
+
     cursor.execute('''
         CREATE TABLE products (
             id INTEGER PRIMARY KEY,
@@ -29,22 +29,25 @@ def test_db():
             category TEXT
         )
     ''')
-    
+
     # Insert test data
     cursor.execute("INSERT INTO users (name, age, email) VALUES ('John', 25, 'john@example.com')")
     cursor.execute("INSERT INTO users (name, age, email) VALUES ('Jane', 30, 'jane@example.com')")
     cursor.execute("INSERT INTO users (name, age, email) VALUES ('Bob', 35, 'bob@example.com')")
-    
+
     cursor.execute("INSERT INTO products (name, price, category) VALUES ('Laptop', 999.99, 'Electronics')")
     cursor.execute("INSERT INTO products (name, price, category) VALUES ('Book', 19.99, 'Education')")
-    
+
     conn.commit()
-    
+
     # Patch the database connection to use our in-memory database
-    with patch('core.sql_processor.sqlite3.connect') as mock_connect:
-        mock_connect.return_value = conn
-        yield conn
-    
+    # The patch must remain active throughout the test execution
+    patcher = patch('core.sql_processor.sqlite3.connect', return_value=conn)
+    patcher.start()
+
+    yield conn
+
+    patcher.stop()
     conn.close()
 
 

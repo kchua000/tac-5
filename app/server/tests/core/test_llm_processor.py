@@ -2,10 +2,11 @@ import pytest
 import os
 from unittest.mock import patch, MagicMock
 from core.llm_processor import (
-    generate_sql_with_openai, 
-    generate_sql_with_anthropic, 
+    generate_sql_with_openai,
+    generate_sql_with_anthropic,
     format_schema_for_prompt,
-    generate_sql
+    generate_sql,
+    generate_natural_language_query
 )
 from core.data_models import QueryRequest
 
@@ -276,12 +277,202 @@ class TestLLMProcessor:
     def test_generate_sql_only_openai_key(self, mock_openai_func):
         # Test when only OpenAI key exists
         mock_openai_func.return_value = "SELECT * FROM sales"
-        
+
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'openai-key'}, clear=True):
             request = QueryRequest(query="Show sales data", llm_provider="anthropic")
             schema_info = {'tables': {}}
-            
+
             result = generate_sql(request, schema_info)
-            
+
             assert result == "SELECT * FROM sales"
             mock_openai_func.assert_called_once_with("Show sales data", schema_info)
+
+
+class TestGenerateNaturalLanguageQuery:
+
+    @patch('core.llm_processor.OpenAI')
+    def test_generate_query_with_openai_success(self, mock_openai_class):
+        # Test successful query generation with OpenAI
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "Show me all users who signed up in the last 30 days"
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            schema_info = {
+                'tables': {
+                    'users': {
+                        'columns': {'id': 'INTEGER', 'name': 'TEXT', 'created_at': 'TIMESTAMP'},
+                        'row_count': 100
+                    }
+                }
+            }
+
+            query, context = generate_natural_language_query(schema_info, complexity="simple")
+
+            assert query == "Show me all users who signed up in the last 30 days"
+            assert "query focuses on" in context
+            mock_client.chat.completions.create.assert_called_once()
+
+            # Verify temperature is higher for variety
+            call_args = mock_client.chat.completions.create.call_args
+            assert call_args[1]['temperature'] == 0.8
+
+    @patch('core.llm_processor.Anthropic')
+    def test_generate_query_with_anthropic_success(self, mock_anthropic_class):
+        # Test successful query generation with Anthropic
+        mock_client = MagicMock()
+        mock_anthropic_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content[0].text = "What are the top 10 products by price?"
+        mock_client.messages.create.return_value = mock_response
+
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key'}, clear=True):
+            schema_info = {
+                'tables': {
+                    'products': {
+                        'columns': {'id': 'INTEGER', 'name': 'TEXT', 'price': 'REAL'},
+                        'row_count': 50
+                    }
+                }
+            }
+
+            query, context = generate_natural_language_query(schema_info, complexity="simple")
+
+            assert query == "What are the top 10 products by price?"
+            assert "query focuses on" in context
+            mock_client.messages.create.assert_called_once()
+
+    @patch('core.llm_processor.OpenAI')
+    def test_generate_query_sentence_limit(self, mock_openai_class):
+        # Test that queries are limited to 2 sentences
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "First sentence. Second sentence. Third sentence. Fourth sentence."
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            schema_info = {
+                'tables': {
+                    'users': {
+                        'columns': {'id': 'INTEGER'},
+                        'row_count': 10
+                    }
+                }
+            }
+
+            query, context = generate_natural_language_query(schema_info)
+
+            # Should only have 2 sentences
+            sentences = query.split('.')
+            assert len([s for s in sentences if s.strip()]) <= 2
+
+    def test_generate_query_empty_database(self):
+        # Test error when no tables available
+        schema_info = {'tables': {}}
+
+        with pytest.raises(ValueError) as exc_info:
+            generate_natural_language_query(schema_info)
+
+        assert "No tables available" in str(exc_info.value)
+
+    @patch('core.llm_processor.OpenAI')
+    def test_generate_query_fallback_on_error(self, mock_openai_class):
+        # Test fallback to generic queries when LLM fails
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception("API Error")
+
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            schema_info = {
+                'tables': {
+                    'users': {
+                        'columns': {'id': 'INTEGER', 'name': 'TEXT'},
+                        'row_count': 50
+                    }
+                }
+            }
+
+            query, context = generate_natural_language_query(schema_info)
+
+            # Should return a fallback query
+            assert query
+            assert 'users' in query.lower()
+            assert context == "This is a basic query to help you explore your data."
+
+    def test_generate_query_no_api_keys(self):
+        # Test error when no API keys available
+        with patch.dict(os.environ, {}, clear=True):
+            schema_info = {
+                'tables': {
+                    'products': {
+                        'columns': {'id': 'INTEGER'},
+                        'row_count': 10
+                    }
+                }
+            }
+
+            # Should fallback to generic queries
+            query, context = generate_natural_language_query(schema_info)
+            assert query
+            assert 'products' in query.lower()
+
+    @patch('core.llm_processor.OpenAI')
+    def test_generate_query_with_multiple_tables(self, mock_openai_class):
+        # Test with multiple tables
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "Show users with their associated orders"
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            schema_info = {
+                'tables': {
+                    'users': {
+                        'columns': {'id': 'INTEGER', 'name': 'TEXT'},
+                        'row_count': 100
+                    },
+                    'orders': {
+                        'columns': {'id': 'INTEGER', 'user_id': 'INTEGER', 'total': 'REAL'},
+                        'row_count': 500
+                    }
+                }
+            }
+
+            query, context = generate_natural_language_query(schema_info)
+
+            assert query == "Show users with their associated orders"
+            assert context
+
+    @patch('core.llm_processor.OpenAI')
+    def test_generate_query_strip_quotes(self, mock_openai_class):
+        # Test that quotes are stripped from generated query
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = '"Show me all products"'
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            schema_info = {
+                'tables': {
+                    'products': {
+                        'columns': {'id': 'INTEGER'},
+                        'row_count': 10
+                    }
+                }
+            }
+
+            query, context = generate_natural_language_query(schema_info)
+
+            assert query == "Show me all products"
+            assert not query.startswith('"')
+            assert not query.endswith('"')

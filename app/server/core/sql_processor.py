@@ -1,8 +1,8 @@
 import sqlite3
 from typing import Dict, Any
 from .sql_security import (
-    execute_query_safely, 
-    validate_sql_query, 
+    execute_query_safely,
+    validate_sql_query,
     SQLSecurityError
 )
 
@@ -13,7 +13,7 @@ def execute_sql_safely(sql_query: str) -> Dict[str, Any]:
     try:
         # Validate the SQL query for dangerous operations
         validate_sql_query(sql_query)
-        
+
         # Connect to database
         conn = sqlite3.connect("db/database.db")
         conn.row_factory = sqlite3.Row  # Enable column access by name

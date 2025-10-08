@@ -13,16 +13,15 @@ from core.data_models import (
     QueryRequest,
     QueryResponse,
     DatabaseSchemaResponse,
-    InsightsRequest,
-    InsightsResponse,
     HealthCheckResponse,
     TableSchema,
-    ColumnInfo
+    ColumnInfo,
+    GenerateQueryRequest,
+    GenerateQueryResponse
 )
 from core.file_processor import convert_csv_to_sqlite, convert_json_to_sqlite, convert_jsonl_to_sqlite
-from core.llm_processor import generate_sql
+from core.llm_processor import generate_sql, generate_natural_language_query
 from core.sql_processor import execute_sql_safely, get_database_schema
-from core.insights import generate_insights
 from core.sql_security import (
     execute_query_safely,
     validate_identifier,
@@ -30,7 +29,6 @@ from core.sql_security import (
     SQLSecurityError
 )
 
-# Load .env file from server directory
 load_dotenv()
 
 # Configure logging
@@ -185,28 +183,6 @@ async def get_database_schema_endpoint() -> DatabaseSchemaResponse:
             error=str(e)
         )
 
-@app.post("/api/insights", response_model=InsightsResponse)
-async def generate_insights_endpoint(request: InsightsRequest) -> InsightsResponse:
-    """Generate statistical insights for table columns"""
-    try:
-        insights = generate_insights(request.table_name, request.column_names)
-        response = InsightsResponse(
-            table_name=request.table_name,
-            insights=insights,
-            generated_at=datetime.now()
-        )
-        logger.info(f"[SUCCESS] Insights generated for table: {request.table_name}, insights count: {len(insights)}")
-        return response
-    except Exception as e:
-        logger.error(f"[ERROR] Insights generation failed: {str(e)}")
-        logger.error(f"[ERROR] Full traceback:\n{traceback.format_exc()}")
-        return InsightsResponse(
-            table_name=request.table_name,
-            insights=[],
-            generated_at=datetime.now(),
-            error=str(e)
-        )
-
 @app.get("/api/health", response_model=HealthCheckResponse)
 async def health_check() -> HealthCheckResponse:
     """Health check endpoint with database status"""
@@ -238,6 +214,38 @@ async def health_check() -> HealthCheckResponse:
             uptime_seconds=0
         )
 
+@app.post("/api/generate-query", response_model=GenerateQueryResponse)
+async def generate_query_endpoint(request: GenerateQueryRequest) -> GenerateQueryResponse:
+    """Generate interesting natural language query based on database schema"""
+    try:
+        # Get database schema
+        schema_info = get_database_schema()
+
+        # Check if tables exist
+        if not schema_info.get('tables') or len(schema_info['tables']) == 0:
+            raise Exception("No tables available. Please upload data first.")
+
+        # Generate natural language query
+        query, context = generate_natural_language_query(
+            schema_info,
+            complexity=request.complexity or "simple"
+        )
+
+        response = GenerateQueryResponse(
+            query=query,
+            context=context
+        )
+        logger.info(f"[SUCCESS] Query generated: {query}")
+        return response
+    except Exception as e:
+        logger.error(f"[ERROR] Query generation failed: {str(e)}")
+        logger.error(f"[ERROR] Full traceback:\n{traceback.format_exc()}")
+        return GenerateQueryResponse(
+            query="",
+            context="",
+            error=str(e)
+        )
+
 @app.delete("/api/table/{table_name}")
 async def delete_table(table_name: str):
     """Delete a table from the database"""
@@ -247,14 +255,14 @@ async def delete_table(table_name: str):
             validate_identifier(table_name, "table")
         except SQLSecurityError as e:
             raise HTTPException(400, str(e))
-        
+
         conn = sqlite3.connect("db/database.db")
-        
+
         # Check if table exists using secure method
         if not check_table_exists(conn, table_name):
             conn.close()
             raise HTTPException(404, f"Table '{table_name}' not found")
-        
+
         # Drop the table using safe query execution with DDL permission
         execute_query_safely(
             conn,
@@ -264,7 +272,7 @@ async def delete_table(table_name: str):
         )
         conn.commit()
         conn.close()
-        
+
         response = {"message": f"Table '{table_name}' deleted successfully"}
         logger.info(f"[SUCCESS] Table deleted: {table_name}")
         return response

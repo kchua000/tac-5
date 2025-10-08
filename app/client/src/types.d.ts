@@ -70,6 +70,18 @@ interface InsightsResponse {
   error?: string;
 }
 
+// Generate Query Types
+interface GenerateQueryRequest {
+  complexity?: "simple" | "complex";
+  specific_tables?: string[];
+}
+
+interface GenerateQueryResponse {
+  query: string;
+  context: string;
+  error?: string;
+}
+
 // Health Check Types
 interface HealthCheckResponse {
   status: "ok" | "error";
