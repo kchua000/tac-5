@@ -1,6 +1,21 @@
 import './style.css'
 import { api } from './api/client'
 
+// Debounce utility function
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  return function(...args: Parameters<T>) {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
+
 // Global state
 
 // Initialize app
@@ -16,36 +31,45 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeQueryInput() {
   const queryInput = document.getElementById('query-input') as HTMLTextAreaElement;
   const queryButton = document.getElementById('query-button') as HTMLButtonElement;
-  
-  queryButton.addEventListener('click', async () => {
+
+  const handleQuery = async () => {
     const query = queryInput.value.trim();
     if (!query) return;
-    
+
     queryButton.disabled = true;
+    queryInput.disabled = true;
     queryButton.innerHTML = '<span class="loading"></span>';
-    
+
     try {
       const response = await api.processQuery({
         query,
         llm_provider: 'openai'  // Default to OpenAI
       });
-      
+
       displayResults(response, query);
-      
+
       // Clear the input field on success
       queryInput.value = '';
     } catch (error) {
       displayError(error instanceof Error ? error.message : 'Query failed');
     } finally {
       queryButton.disabled = false;
+      queryInput.disabled = false;
       queryButton.textContent = 'Query';
     }
-  });
-  
+  };
+
+  // Wrap with debounce to prevent rapid-fire submissions
+  const debouncedHandleQuery = debounce(handleQuery, 300);
+
+  queryButton.addEventListener('click', debouncedHandleQuery);
+
   // Allow Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to submit
   queryInput.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      queryButton.click();
+      if (!queryButton.disabled) {
+        queryButton.click();
+      }
     }
   });
 }

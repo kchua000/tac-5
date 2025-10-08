@@ -77,6 +77,12 @@ h2 {
   border-color: var(--primary-color);
 }
 
+#query-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .query-controls {
   display: flex;
   justify-content: space-between;

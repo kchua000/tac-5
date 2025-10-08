@@ -10,12 +10,15 @@ def test_db():
     """Create an in-memory test database"""
     # Create in-memory database
     conn = sqlite3.connect(':memory:')
-    
+
     # Patch the database connection to use our in-memory database
-    with patch('core.file_processor.sqlite3.connect') as mock_connect:
-        mock_connect.return_value = conn
-        yield conn
-    
+    # The patch must remain active throughout the test execution
+    patcher = patch('core.file_processor.sqlite3.connect', return_value=conn)
+    patcher.start()
+
+    yield conn
+
+    patcher.stop()
     conn.close()
 
 
